@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 
+from six.moves.urllib.parse import urljoin
 from ansible.module_utils.basic import *
 import requests
 import json
@@ -7,11 +8,56 @@ import json
 try:
     from akamai.edgegrid import EdgeGridAuth, EdgeRc
 except ImportError:
-    print "Please install `edgegrid-python` using pip"
+    print("Please install `edgegrid-python` using pip")
 from os.path import expanduser
-from urlparse import urljoin
 
-DOCUMENTATION = ''' docs '''
+DOCUMENTATION = """
+---
+module: akamai
+short_description: Module to use edgerc auth with Edgegrid to interact with the Akamai API
+author:
+    - Jacob Hudson (@jacob-hudson)
+    - Matt Hyclak (@mhyclak-silex)
+version_added: 2.4
+description:
+    - Interacts with the Akamai API using the Python EdgeGrid library.
+
+options:
+    endpoint:
+        description:
+            - Endpoint of the URL you wish to interact with
+        required: true
+        type: str
+    method:
+        description:
+            - HTTP method to perform
+        required: true
+        choices: [GET, PATCH, POST, PUT]
+        type: str
+    section:
+        description:
+            - Section of the edgerc file to parse.
+        required: false
+        default: default
+        type: str
+    body:
+        description:
+            - Additional data to submit with the HTTP request
+        required: false
+        type: str
+    headers:
+        description:
+            - Additional headers to submit with the HTTP request
+        required: false
+        type: str
+    edge_config:
+        description:
+            - Path to the edgerc file with authentication details
+        required: false
+        default: ~/.edgerc
+        type: str
+"""
+
 EXAMPLES = ''' examples '''
 
 def get_request_file(json_file):
@@ -21,9 +67,12 @@ def get_request_file(json_file):
     return body
 
 def authenticate(params):
-    # get home location
-    home = expanduser("~")
-    filename = "%s/.edgerc" % home
+    if params["edge_config"].startswith('~'):
+        # get home location
+        home = expanduser("~")
+        filename = params["edge_config"].replace('~', home)
+    else:
+        filename = params["edge_config"]
 
     # extract edgerc properties
     edgerc = EdgeRc(filename)
@@ -40,23 +89,43 @@ def authenticate(params):
 
     if params["method"] == "GET":
         response = s.get(urljoin(baseurl, endpoint))
-        if response.status_code != 400 and response.status_code != 404:
+        if response.status_code not in [400, 401, 404]:
             return False, False, response.json()
         else:
             return True, False, response.json()
+    elif params["method"] == "PATCH":
+        if params["body"] is not None:
+            body = get_request_file(params["body"])
+            headers = {'content-type': 'application/json'}
+            response = s.patch(urljoin(baseurl, endpoint), json=body, headers=headers)
+        else:
+            headers = {'content-type': 'application/json'}
+            response = s.patch(urljoin(baseurl, endpoint), headers=headers)
+        if response.status_code not in [400, 401, 404]:
+            return False, True, response.json()
+        else:
+            return True, False, response.json()
     elif params["method"] == "POST":
-        body = get_request_file(params["body"])
-        headers = {'content-type': 'application/json'}
-        response = s.post(urljoin(baseurl, endpoint), json=body, headers=headers)
-        if response.status_code != 400 and response.status_code != 404:
+        if params["body"] is not None:
+            body = get_request_file(params["body"])
+            headers = {'content-type': 'application/json'}
+            response = s.post(urljoin(baseurl, endpoint), json=body, headers=headers)
+        else:
+            headers = {'content-type': 'application/json'}
+            response = s.post(urljoin(baseurl, endpoint), headers=headers)
+        if response.status_code not in [400, 401, 404]:
             return False, True, response.json()
         else:
             return True, False, response.json()
     elif params["method"] == "PUT":
-        body = get_request_file(params["body"])
-        headers = {'content-type': 'application/json'}
-        response = s.put(urljoin(baseurl, endpoint), json=body, headers=headers)
-        if response.status_code != 400 and response.status_code != 404:
+        if params["body"] is not None:
+            body = get_request_file(params["body"])
+            headers = {'content-type': 'application/json'}
+            response = s.put(urljoin(baseurl, endpoint), json=body, headers=headers)
+        else:
+            headers = {'content-type': 'application/json'}
+            response = s.put(urljoin(baseurl, endpoint), headers=headers)
+        if response.status_code not in [400, 401, 404]:
             return False, True, response.json()
         else:
             return True, False, response.json()
@@ -66,11 +135,12 @@ def authenticate(params):
 
 def main():
     fields = {
-        "section": {"required": True, "type": "str"},
+        "section": {"required": False, "type": "str", "default": "default"},
         "endpoint": {"required": True, "type": "str"},
         "method": {"required": True, "type": "str"},
         "body": {"required": False, "type": "str"},
-        "headers": {"required": False, "type": "str"}
+        "headers": {"required": False, "type": "str"},
+        "edge_config": {"required": False, "type": "str", "default": "~/.edgerc" }
     }
 
     module = AnsibleModule(argument_spec=fields)
